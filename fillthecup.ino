@@ -432,11 +432,19 @@ void loop() {
     arduboy.setRGBled(reset_animation,(uint8_t)score>>3,(uint8_t)score>>2);
     
     score = 0;
-    for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
-      arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-      checkScore(i,p[i].x,p[i].y);
+    if(arduboy.everyXFrames(2)){
+      for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
+        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
+        checkScore(i,p[i].x,p[i].y);
+      }
+      arduboy.display();
+    }else{
+      arduboy.display();
+      for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
+        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
+        checkScore(i,p[i].x,p[i].y);
+      }
     }
-    arduboy.display();
     arduboy.drawFastHLine(0,7,128); //nice unseen seperation draws a white line after the screens been rendered which makes the particles not go in that black area
 }
 
