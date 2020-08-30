@@ -8,7 +8,6 @@ Font4x6 font = Font4x6();
 const uint8_t PROGMEM sprites[] =
 {
 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //0   empty
 0xf0, 0x0c, 0x20, 0xc0, 0x06, 0xf8, 0x02, 0x3c, //1   grass
 0x40, 0x90, 0x24, 0x88, 0xe2, 0xf4, 0xf1, 0xfa, //2   sun 0
 0xfa, 0xf1, 0xf4, 0xe2, 0x88, 0x24, 0x90, 0x40, //3   sun 1
@@ -227,8 +226,8 @@ uint8_t w[2][4]{{ 2, 2,25,16},{ 5,16,22,28}}; //AABB collision array for the cup
 
 //the particles are only bytes and nothing else to save space
 struct Particle{
-  byte x;
-  byte y;
+  uint8_t x;
+  uint8_t y;
 };
 //they share velocities due to them all being controlled by you
 int8_t x_vol;
@@ -238,7 +237,7 @@ int8_t y_brownian;
 
 
 uint8_t brown;
-bool toggler;//just makes things a little nicer physics wise 
+bool toggler;//toggles every frame
 
 bool blink;//general purpose switch for animations and other dubious things 
 
@@ -246,6 +245,7 @@ uint8_t current_level = 1;
 uint8_t level_height = 40;
 uint16_t level_time = 0;
 uint8_t level_screen[16][7];
+
 bool time_trial;
 bool game_over;
 
@@ -268,17 +268,18 @@ uint8_t reset_animation = 0;
 
 //in stores where the split in th particle array is to treat them differently
 uint16_t in;
-float score;
+
+
+uint8_t score;
 
 
 //holder is general purpose just to avoid having to waste resources 
 uint8_t holder;
 
 #define MAX_PARTICLES 400
-#define FRAMERATE 60
 struct Particle p[MAX_PARTICLES];
 
-
+#define FRAMERATE 60
 void setup() {
   arduboy.begin();
   arduboy.setFrameRate(FRAMERATE);
@@ -288,20 +289,21 @@ void setup() {
 void loop() {
   
     if (WDTCSR & _BV(WDE)) // if watchdog timer is enabled. disable ints and set magic key
-  {
-    cli();
-    *(volatile uint8_t *) MAGIC_KEY_POS      = lowByte (MAGIC_KEY);
-    *(volatile uint8_t *)(MAGIC_KEY_POS + 1) = highByte(MAGIC_KEY);
-    while(true);
-  } 
+    {
+      cli();
+      *(volatile uint8_t *) MAGIC_KEY_POS      = lowByte (MAGIC_KEY);
+      *(volatile uint8_t *)(MAGIC_KEY_POS + 1) = highByte(MAGIC_KEY);
+      while(true);
+    } 
     if (!arduboy.nextFrame()){
       brown++;
       return;
     }
-    if(arduboy.everyXFrames(FRAMERATE)){blink^=true;}
-    
-    if(toggler){brown++;toggler^=true;}
-    score = score/((float)particle_count/100);
+    toggler^=true;
+    if(arduboy.everyXFrames(FRAMERATE)){blink^=true;}//blinks every second
+
+
+    score = map(in,0,particle_count,0,100+(100-percent_required));//cancer code
     
     if(arduboy.everyXFrames(7)){
       bird_animation=((bird_animation+1)%6);
@@ -313,7 +315,7 @@ void loop() {
 
     hatch_animation = (arduboy.pressed(A_BUTTON))?1:0; //toggle for the valves should probably change the name frankly
     
-    if(score<percent_required&&!game_over){//only run game look if the games not over and if the score is still below the requirement
+    if(score<100&&!game_over){//only run game look if the games not over and if the score is still below the requirement
       
       if(arduboy.pressed(B_BUTTON)){//level reset which is about 2 seconds before activating
         if(reset_animation == 40){
@@ -338,7 +340,7 @@ void loop() {
       //the actual game loop level height defaults to 8 because the level is only rendered starting at 8 because of the UI above
       if(level_height==8){
         if(time_trial)level_time--;
-        else level_time++;
+        else if(level_time<54000) level_time++;//the time locks at 15 min because technical max is just under 20
 
         //the control code gubbins
         x_vol = 0;
@@ -361,7 +363,7 @@ void loop() {
         particlePhysics();
       }
       arduboy.clear();//clear the physics steps done in the buffer before rendering the UI
-      if(level_height>8&&arduboy.everyXFrames(2))level_height--;//moves screen up
+      if(level_height>8&&toggler)level_height--;//moves screen up
     }else{
       
       //this is the level complete code either in a game over or a level complete the game_over flag will decide the differences
@@ -373,7 +375,7 @@ void loop() {
       if(arduboy.justPressed(B_BUTTON)){
         startGame();  
       }
-      if(arduboy.everyXFrames(2)&&level_height<64)level_height++;
+      if(toggler&&level_height<64)level_height++;
       font.setCursor((-64)+level_height,15);
       if(game_over)font.println(F("You ran out of time"));
       else font.println(F("A:Next level"));
@@ -386,17 +388,17 @@ void loop() {
     for(uint8_t y = 0; y < 7; y++){
       for(uint8_t x = 0; x < 16; x++){
         holder = level_screen[x][y];
-        if(holder==0)continue; //if its blank then just skip
+        if(holder==255)continue; //if its blank then just skip
         
-        if(holder>=13&&holder<19){//the range for the bird animation
-          holder = 13+((holder-13)+bird_animation)%6;//this code allows the animation to take place at any starting point so you can have offset bird animations
+        if(holder>=12&&holder<18){//the range for the bird animation
+          holder = 12+((holder-12)+bird_animation)%6;//this code allows the animation to take place at any starting point so you can have offset bird animations
           arduboy.drawBitmap(x*8,(y*8)-(level_height-16),sprites+holder*8,8,8,WHITE);//make bird fly up 
         }else{
-          if(holder==11&&level_height==8&&cloud_animation>0){//range for cloud animation
+          if(holder==10&&level_height==8&&cloud_animation>0){//range for cloud animation
               holder++;
               cloud_animation--;
-          }else if(holder >= 43){//range for latch animation its at the end so no need to check holder <= 43
-            holder = (hatch_animation!=0)? holder^0b00000111:holder; // keeps holder as is or XOR it to turn 43 into 44 or 44 into 43
+          }else if(holder >= 42){//range for latch animation its at the end so no need to check holder <= 43
+            holder = (hatch_animation!=0)? holder^1:holder; // keeps holder as is or XOR it to turn 43 into 44 or 44 into 43
           }
           arduboy.drawBitmap(x*8,(y*8)+level_height,sprites+holder*8,8,8,WHITE);//the basic render that everything else goes through
         }
@@ -406,47 +408,142 @@ void loop() {
     //the cup is just a bunch of lines which I think is better than just using a bunch of sprites to do it not sure
     drawBucket(cup_location_x,cup_location_y);
 
-    if(score<percent_required||blink){//blink is what makes the game flash the percent/time/level at you when you complete the level
+    if(score<100||blink){//blink is what makes the game flash the percent/time/level at you when you complete the level
       font.setCursor(0,-1);
 
       //basic time convertion 
       font.print(((level_time/FRAMERATE)/60)%60);
-      font.print((":"));
+      font.print(F(":"));
       holder = ((level_time/FRAMERATE)%60);
-      if(holder<10)font.print(("0"));
+      if(holder<10)font.print(F("0"));
       font.print(holder);
       
       font.setCursor(55,-1);
 
-      //would remove map function for somthing better but fheck it IM ON A BUDGET
-      score = map(score,0,percent_required,0,100);
-      font.print((uint8_t)score);
+      font.print(score);
       font.print(("%"));
       font.setCursor(100,-1);
-      font.print((current_level<10)?(" Lv "):("Lv "));
+      font.print((current_level<10)?F(" Lv "):F("Lv "));
       font.print(current_level);
     }
     arduboy.drawFastHLine(0,6,128);
 
     //makes the LED look nice and shiny also using shifting to change the brightness
-    arduboy.setRGBled(reset_animation,(uint8_t)score>>3,(uint8_t)score>>2);
+    arduboy.setRGBled(reset_animation,score>>3,score>>2);
     
-    score = 0;
-    if(arduboy.everyXFrames(2)){
-      for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-        checkScore(i,p[i].x,p[i].y);
+    for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
+      //if(toggler)
+      arduboy.drawPixel(p[i].x,p[i].y,WHITE);
+      if( toggler&&(i&1)==0)checkScore(i,p[i].x,p[i].y);
+      if(!toggler&&(i&1)==1)checkScore(i,p[i].x,p[i].y);//do the score check over two frames to half the load
+    }
+    arduboy.display();
+    /*
+    for(uint16_t i = 0; i < particle_count; i++){
+      if(!toggler)arduboy.drawPixel(p[i].x,p[i].y,WHITE);
+    }*/
+    //uncomment this and also toggler inside of the other above to enable grey mode
+}
+
+
+
+
+void particlePhysics(){
+  
+  for(uint16_t i = 0; i < particle_count; i++){
+    x_brownian = x_vol;
+    y_brownian = y_vol;
+    brown++;
+    if(x_vol == 0)
+      x_brownian = ((brown&1)==0)?-1:1;
+    else if(y_vol == 0)
+      y_brownian = ((brown&1)==0)?-1:1;
+    arduboy.drawPixel(p[i].x,p[i].y,BLACK);
+    if(x_brownian>0){
+      if(canMove(p[i].x+1,p[i].y)){
+        p[i].x++;
       }
-      arduboy.display();
     }else{
-      arduboy.display();
-      for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-        checkScore(i,p[i].x,p[i].y);
+      if(canMove(p[i].x-1,p[i].y)){
+        p[i].x--;
       }
     }
-    arduboy.drawFastHLine(0,7,128); //nice unseen seperation draws a white line after the screens been rendered which makes the particles not go in that black area
+    if(y_brownian>0){
+      if(canMove(p[i].x,p[i].y+1)){
+        p[i].y++;
+      }
+    }else{//                        particles get slowed when in the cup to help them stay inside
+      if(canMove(p[i].x,p[i].y-1)&&(i>=in||arduboy.everyXFrames(difficulty))){
+        p[i].y--;
+      }
+    }
+    arduboy.drawPixel(p[i].x,p[i].y,WHITE);
+  }
 }
+
+//if it cant move itll increment brown just for added randomness 
+boolean canMove(uint8_t x, uint8_t y){
+
+  uint8_t row = y / 8;
+  holder = y % 8;
+
+  
+  if((Arduboy2::sBuffer[(row*WIDTH) + x] & _BV(holder)) >> holder){
+    brown++;
+    return false;
+  }
+  return !(x<0||y<8||y>63||x>127);//collision bounds for the particles could probably set y to 8 instead of 0 with the new UI
+}
+
+/*
+ * this is the important code that allows the code to keep track of what is in the cup and what is not
+ * if the particle is in the cup it will increment score and then run the in function
+ * the in function will swap the x y locations of the particle with the one on top of the stack thats not in the cup
+ * and then increment in by 1
+ * 
+ * so in short
+ * 
+ * if a particles id is less than the IN variable it is in the cup and that's all youll need to check in the rest of the code
+ * 
+ * performance optimisations im planning with this are to do it over the course of multiple frames since its a low reuirement in terms of gameplay
+ */
+
+void checkScore(uint16_t &i, uint8_t &x, uint8_t &y){//AABB box collisions for the shape of the cup
+    if(x>=w[0][0]&&y>=w[0][1]&&x<=w[0][2]&&y<=w[0][3]||
+       x>=w[1][0]&&y>=w[1][1]&&x<=w[1][2]&&y<=w[1][3]
+    ){
+      pIn(i);
+    }else if(i<in){
+        pOut(i);
+    }
+}
+
+void pIn(uint16_t & i){
+  if(i >= in){
+    swap(p[in].x,p[i].x,p[in].y,p[i].y);
+    in++;
+  }
+}
+void pOut(uint16_t & i){
+  if(i < in){
+    swap(p[in].x,p[i].x,p[in].y,p[i].y);
+    in--;
+  }
+}
+void swap(uint8_t &x, uint8_t &xx,uint8_t &y, uint8_t &yy) {
+  holder = x;
+  x = xx;
+  xx = y;
+  y = yy;
+  yy = xx;
+  xx = holder;
+}
+/*
+void swap(uint8_t &a, uint8_t &b) {
+  holder = a;
+  a = b;
+  b = holder;
+}*/
 
 void startGame(){
   arduboy.setRGBled(0,0,0);
@@ -469,7 +566,11 @@ void startGame(){
   if(current_level>levels&&current_level){
     level_time          = FRAMERATE+pgm_read_byte(&level[(current_level-1)%levels][TIME_TRIAL])*FRAMERATE;
     level_time--; // remove the visible extra second
-    level_time-=(((current_level-11)/10)*5)*FRAMERATE;
+
+    level_time -= ((level_time/300)*((current_level-11)/10))*FRAMERATE;
+    
+    //level_time-= (((current_level-11)/10)*5)*FRAMERATE;
+    
     time_trial = true;
     difficulty = 0;  
   }
@@ -486,7 +587,7 @@ void startGame(){
   //load the level from flash to ram this improves the performance a lot
   for(uint8_t y = 0; y < 7; y++){
      for(uint8_t x = 0; x < 16; x++){
-      level_screen[x][y] = pgm_read_byte(&level[(current_level-1)%levels][(x+((y*16)))+LEVEL_DATA]);
+      level_screen[x][y] = pgm_read_byte(&level[(current_level-1)%levels][(x+((y*16)))+LEVEL_DATA])-1;
      }
   }
   for(uint16_t i = 0; i < particle_count; i++){
@@ -496,104 +597,6 @@ void startGame(){
   //sets the cloud animation time by scaling it with the particle count
   cloud_animation = map(particle_count,0,MAX_PARTICLES,0,160);
 }
-
-
-void particlePhysics(){
-  
-  for(uint16_t i = 0; i < particle_count; i++){
-    x_brownian = x_vol;
-    y_brownian = y_vol;
-    
-    if(x_vol == 0)//this can be improved but the brownian motion provides randomness to the vector thats currently not under control 
-      x_brownian = (brown++%2==0)?-1:1;
-    else if(y_vol == 0)
-      y_brownian = (brown++%2==0)?-1:1;
-    
-    if(x_brownian>0){
-      if(canMove(p[i].x+1,p[i].y)){//should probably turn this into a function now that the rendering is done within this block
-        arduboy.drawPixel(p[i].x,p[i].y,BLACK);
-        p[i].x++;
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-      }
-    }else{
-      if(canMove(p[i].x-1,p[i].y)){
-        arduboy.drawPixel(p[i].x,p[i].y,BLACK);
-        p[i].x--;
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-      }
-    }
-    if(y_brownian>0){
-      if(canMove(p[i].x,p[i].y+1)){
-        arduboy.drawPixel(p[i].x,p[i].y,BLACK);
-        p[i].y++;
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-      }
-    }else{//                        particles get slowed when in the cup to help them stay inside
-      if(canMove(p[i].x,p[i].y-1)&&(i>=in||arduboy.everyXFrames(difficulty))){
-        arduboy.drawPixel(p[i].x,p[i].y,BLACK);
-        p[i].y--;
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-      }
-    }
-    
-  }
-}
-
-//if it cant move itll increment brown just for added randomness 
-boolean canMove(uint8_t x, uint8_t y){
-  if(arduboy.getPixel(x,y)==WHITE){
-    brown++;
-    return false;
-  }
-  return !(x<0||y<0||y>63||x>127);//collision bounds for the particles could probably set y to 8 instead of 0 with the new UI
-}
-
-/*
- * this is the important code that allows the code to keep track of what is in the cup and what is not
- * if the particle is in the cup it will increment score and then run the in function
- * the in function will swap the x y locations of the particle with the one on top of the stack thats not in the cup
- * and then increment in by 1
- * 
- * so in short
- * 
- * if a particles id is less than the IN variable it is in the cup and that's all youll need to check in the rest of the code
- * 
- * performance optimisations im planning with this are to do it over the course of multiple frames since its a low reuirement in terms of gameplay
- */
-
-void checkScore(uint16_t &i, uint8_t &x, uint8_t &y){//AABB box collisions for the shape of the cup
-    if(x>=w[0][0]&&y>=w[0][1]&&x<=w[0][2]&&y<=w[0][3]||
-       x>=w[1][0]&&y>=w[1][1]&&x<=w[1][2]&&y<=w[1][3]
-    ){
-      score++;
-      pIn(i);
-    }else if(i<in){
-        pOut(i);
-    }
-}
-
-void pIn(uint16_t & i){
-  if(i >= in){
-    swap(p[in].x,p[i].x);//should write a new function that does this in one step 
-    swap(p[in].y,p[i].y);
-    in++;
-  }
-}
-void pOut(uint16_t & i){
-  if(i < in){
-    swap(p[in].x,p[i].x);
-    swap(p[in].y,p[i].y);
-    in--;
-  }
-}
-
-void swap(uint8_t &a, uint8_t &b) {
-  holder = a;
-  a = b;
-  b = holder;
-}
-
-
 
 
 //ugly junk
