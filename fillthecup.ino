@@ -8,7 +8,6 @@ Font4x6 font = Font4x6();
 const uint8_t PROGMEM sprites[] =
 {
 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //0   empty
 0xf0, 0x0c, 0x20, 0xc0, 0x06, 0xf8, 0x02, 0x3c, //1   grass
 0x40, 0x90, 0x24, 0x88, 0xe2, 0xf4, 0xf1, 0xfa, //2   sun 0
 0xfa, 0xf1, 0xf4, 0xe2, 0x88, 0x24, 0x90, 0x40, //3   sun 1
@@ -53,6 +52,7 @@ const uint8_t PROGMEM sprites[] =
 0xff, 0xf0, 0x00, 0x00, 0x00, 0x00, 0xf0, 0xff, //42  funnel bottom top
 0x81, 0x02, 0x04, 0x18, 0x18, 0x20, 0x40, 0x81, //43 valve
 0x81, 0x40, 0x20, 0x18, 0x18, 0x04, 0x02, 0x81, //44 valve 2
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //45 BLOCK
 };
 
 #define PARTICLE_COUNT      0
@@ -129,7 +129,7 @@ const uint8_t PROGMEM level[][120] = {
    36,36,36,36,36,36,37, 0, 0,40,36,36,36,36,36,36,
 },
 { 
-   (50>>1),  // particles
+   (40>>1),  // particles
    100,       // percent required
    0,         // difficulty higher is easier 0 will base it off level value
    0,32,     // cup location x,y
@@ -207,7 +207,7 @@ const uint8_t PROGMEM level[][120] = {
 { 
    (400>>1),  // particles
    100,       // percent required
-   0,         // difficulty higher is easier 0 will base it off level value
+   10,         // difficulty higher is easier 0 will base it off level value
    50,31,     // cup location x,y
    100,21,    // particle position x,y
    60,
@@ -227,8 +227,8 @@ uint8_t w[2][4]{{ 2, 2,25,16},{ 5,16,22,28}}; //AABB collision array for the cup
 
 //the particles are only bytes and nothing else to save space
 struct Particle{
-  byte x;
-  byte y;
+  uint8_t x;
+  uint8_t y;
 };
 //they share velocities due to them all being controlled by you
 int8_t x_vol;
@@ -238,7 +238,7 @@ int8_t y_brownian;
 
 
 uint8_t brown;
-bool toggler;//just makes things a little nicer physics wise 
+bool toggler;//toggles every frame
 
 bool blink;//general purpose switch for animations and other dubious things 
 
@@ -246,6 +246,7 @@ uint8_t current_level = 1;
 uint8_t level_height = 40;
 uint16_t level_time = 0;
 uint8_t level_screen[16][7];
+
 bool time_trial;
 bool game_over;
 
@@ -258,8 +259,6 @@ uint8_t cup_location_y = 62;
 uint8_t particle_location_x = 100;
 uint8_t particle_location_y = 21;
 
-
-
 uint8_t bird_animation = 0;
 uint8_t cloud_animation = 0;
 uint8_t hatch_animation = 0;
@@ -268,17 +267,18 @@ uint8_t reset_animation = 0;
 
 //in stores where the split in th particle array is to treat them differently
 uint16_t in;
-float score;
+
+
+uint8_t score;
 
 
 //holder is general purpose just to avoid having to waste resources 
 uint8_t holder;
 
 #define MAX_PARTICLES 400
-#define FRAMERATE 60
 struct Particle p[MAX_PARTICLES];
 
-
+#define FRAMERATE 60
 void setup() {
   arduboy.begin();
   arduboy.setFrameRate(FRAMERATE);
@@ -288,20 +288,22 @@ void setup() {
 void loop() {
   
     if (WDTCSR & _BV(WDE)) // if watchdog timer is enabled. disable ints and set magic key
-  {
-    cli();
-    *(volatile uint8_t *) MAGIC_KEY_POS      = lowByte (MAGIC_KEY);
-    *(volatile uint8_t *)(MAGIC_KEY_POS + 1) = highByte(MAGIC_KEY);
-    while(true);
-  } 
-    if (!arduboy.nextFrame()){
+    {
+      cli();
+      *(volatile uint8_t *) MAGIC_KEY_POS      = lowByte (MAGIC_KEY);
+      *(volatile uint8_t *)(MAGIC_KEY_POS + 1) = highByte(MAGIC_KEY);
+      while(true);
+    } 
+    if (!arduboy.nextFrameDEV()){
       brown++;
       return;
     }
-    if(arduboy.everyXFrames(FRAMERATE)){blink^=true;}
-    
-    if(toggler){brown++;toggler^=true;}
-    score = score/((float)particle_count/100);
+    toggler^=true;
+    if(toggler)brown++;
+    if(arduboy.everyXFrames(FRAMERATE)){blink^=true;}//blinks every second
+
+
+    score = map(in,0,particle_count,0,100+(100-percent_required));//cancer code
     
     if(arduboy.everyXFrames(7)){
       bird_animation=((bird_animation+1)%6);
@@ -312,8 +314,63 @@ void loop() {
     
 
     hatch_animation = (arduboy.pressed(A_BUTTON))?1:0; //toggle for the valves should probably change the name frankly
+
+
     
-    if(score<percent_required&&!game_over){//only run game look if the games not over and if the score is still below the requirement
+    //render the level
+    for(uint8_t y = 0; y < 7; y++){
+      for(uint8_t x = 0; x < 16; x++){
+        holder = level_screen[x][y];
+        if(holder==255)continue; //if its blank then just skip
+        
+        if(holder>=12&&holder<18){//the range for the bird animation
+          drawBitmap(x*8,(y*8)-(level_height-16),44);
+          holder = 12+((holder-12)+(bird_animation))%6;//this code allows the animation to take place at any starting point so you can have offset bird animations
+          drawBitmap(x*8,(y*8)-(level_height-16),holder);//make bird fly up 
+        }else{
+          if(holder==10){//range for cloud animation
+              if(cloud_animation>0&&level_height==8)holder++;
+              drawBitmap(x*8,(y*8)+level_height,44);
+              drawBitmap(x*8,(y*8)+level_height,holder);
+          }else if(holder >= 42){//range for latch animation its at the end so no need to check holder <= 43
+            drawBitmap(x*8,(y*8)+level_height,44);
+            holder = (hatch_animation!=0)? holder^1:holder; // keeps holder as is or XOR it to turn 43 into 44 or 44 into 43
+            drawBitmap(x*8,(y*8)+level_height,holder);
+          }else{
+            if(cloud_animation>0) drawBitmap(x*8,(y*8)+level_height,holder);//the basic render that everything else goes through
+          }
+        }
+      }
+    }
+    
+    //the cup is just a bunch of lines which I think is better than just using a bunch of sprites to do it not sure
+    if(cloud_animation>0)drawBucket(cup_location_x,cup_location_y);
+
+    if(score<100||blink){//blink is what makes the game flash the percent/time/level at you when you complete the level
+      font.setCursor(0,-1);
+      for(uint8_t i = 0; i<16*8 ; i+=8){// wipe the top row
+        drawBitmap(i,0,44);
+      }
+      //basic time convertion 
+      font.print(((level_time/FRAMERATE)/60)%60);
+      font.print(F(":"));
+      holder = ((level_time/FRAMERATE)%60);
+      if(holder<10)font.print(F("0"));
+      font.print(holder);
+      
+      font.setCursor(55,-1);
+
+      font.print(score);
+      font.print(("%"));
+      font.setCursor(100,-1);
+      font.print((current_level<10)?F(" Lv "):F("Lv "));
+      font.print(current_level);
+    }
+    arduboy.drawFastHLine(0,6,128);
+
+
+    
+    if(score<100&&!game_over){//only run game look if the games not over and if the score is still below the requirement
       
       if(arduboy.pressed(B_BUTTON)){//level reset which is about 2 seconds before activating
         if(reset_animation == 40){
@@ -327,10 +384,6 @@ void loop() {
       
       //mostly debug but peeps can use it if they want because im nice
       if(arduboy.justPressed(DOWN_BUTTON)&&arduboy.justPressed(A_BUTTON)){
-        for(int i = 0; i < particle_count; i++){
-          p[i].x = cup_location_x+13;
-          p[i].y = cup_location_y;
-        } 
         current_level++;
         startGame();   
       }
@@ -338,7 +391,7 @@ void loop() {
       //the actual game loop level height defaults to 8 because the level is only rendered starting at 8 because of the UI above
       if(level_height==8){
         if(time_trial)level_time--;
-        else level_time++;
+        else if(level_time<54000) level_time++;//the time locks at 15 min because technical max is just under 20
 
         //the control code gubbins
         x_vol = 0;
@@ -360,157 +413,59 @@ void loop() {
         //the important bit moved to its own function for the ease of the read
         particlePhysics();
       }
-      arduboy.clear();//clear the physics steps done in the buffer before rendering the UI
-      if(level_height>8&&arduboy.everyXFrames(2))level_height--;//moves screen up
-    }else{
       
+      if(level_height>8){
+        if(toggler)level_height--;//moves screen up
+        //clear the physics steps done in the buffer before rendering the UI
+      }
+    }else{
       //this is the level complete code either in a game over or a level complete the game_over flag will decide the differences
-      arduboy.clear();
+      cloud_animation = 10;
       if(arduboy.justPressed(A_BUTTON)&&!game_over){
-          current_level++;
-          startGame();
+        current_level++;
+        startGame();
       }
       if(arduboy.justPressed(B_BUTTON)){
         startGame();  
       }
-      if(arduboy.everyXFrames(2)&&level_height<64)level_height++;
+      if(toggler&&level_height<64)level_height++;
       font.setCursor((-64)+level_height,15);
       if(game_over)font.println(F("You ran out of time"));
       else font.println(F("A:Next level"));
       font.print(F("B:Retry"));
-      
-    }
-
-    
-    //render the level
-    for(uint8_t y = 0; y < 7; y++){
-      for(uint8_t x = 0; x < 16; x++){
-        holder = level_screen[x][y];
-        if(holder==0)continue; //if its blank then just skip
-        
-        if(holder>=13&&holder<19){//the range for the bird animation
-          holder = 13+((holder-13)+bird_animation)%6;//this code allows the animation to take place at any starting point so you can have offset bird animations
-          arduboy.drawBitmap(x*8,(y*8)-(level_height-16),sprites+holder*8,8,8,WHITE);//make bird fly up 
-        }else{
-          if(holder==11&&level_height==8&&cloud_animation>0){//range for cloud animation
-              holder++;
-              cloud_animation--;
-          }else if(holder >= 43){//range for latch animation its at the end so no need to check holder <= 43
-            holder = (hatch_animation!=0)? holder^0b00000111:holder; // keeps holder as is or XOR it to turn 43 into 44 or 44 into 43
-          }
-          arduboy.drawBitmap(x*8,(y*8)+level_height,sprites+holder*8,8,8,WHITE);//the basic render that everything else goes through
-        }
+      for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
+        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
       }
     }
-    
-    //the cup is just a bunch of lines which I think is better than just using a bunch of sprites to do it not sure
-    drawBucket(cup_location_x,cup_location_y);
-
-    if(score<percent_required||blink){//blink is what makes the game flash the percent/time/level at you when you complete the level
-      font.setCursor(0,-1);
-
-      //basic time convertion 
-      font.print(((level_time/FRAMERATE)/60)%60);
-      font.print((":"));
-      holder = ((level_time/FRAMERATE)%60);
-      if(holder<10)font.print(("0"));
-      font.print(holder);
-      
-      font.setCursor(55,-1);
-
-      //would remove map function for somthing better but fheck it IM ON A BUDGET
-      score = map(score,0,percent_required,0,100);
-      font.print((uint8_t)score);
-      font.print(("%"));
-      font.setCursor(100,-1);
-      font.print((current_level<10)?(" Lv "):("Lv "));
-      font.print(current_level);
-    }
-    arduboy.drawFastHLine(0,6,128);
 
     //makes the LED look nice and shiny also using shifting to change the brightness
-    arduboy.setRGBled(reset_animation,(uint8_t)score>>3,(uint8_t)score>>2);
-    
-    score = 0;
-    if(arduboy.everyXFrames(2)){
-      for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-        checkScore(i,p[i].x,p[i].y);
-      }
-      arduboy.display();
-    }else{
-      arduboy.display();
-      for(uint16_t i = 0; i < particle_count; i++){//finally render the particles for the display and also the physics step next frame
-        arduboy.drawPixel(p[i].x,p[i].y,WHITE);
-        checkScore(i,p[i].x,p[i].y);
-      }
-    }
-    arduboy.drawFastHLine(0,7,128); //nice unseen seperation draws a white line after the screens been rendered which makes the particles not go in that black area
+    arduboy.setRGBled(reset_animation,score>>3,score>>2);
+
+    arduboy.display();
+
+    if(cloud_animation!=0&&level_height==8)cloud_animation--;
+    if(cloud_animation>0)arduboy.clear();
 }
 
-void startGame(){
-  arduboy.setRGBled(0,0,0);
-  score = 0;
-  in = 0;
-  level_time = 0;
-  game_over = false;
-  //load in level data for simplicitys sake
-  particle_count      = pgm_read_byte(&level[(current_level-1)%levels][PARTICLE_COUNT])<<1;
-  percent_required    = pgm_read_byte(&level[(current_level-1)%levels][PERCENT_REQUIRED]);
-  difficulty          = pgm_read_byte(&level[(current_level-1)%levels][DIFFICULTY]);
-  cup_location_x      = pgm_read_byte(&level[(current_level-1)%levels][CUP_LOCATION_X]);
-  cup_location_y      = pgm_read_byte(&level[(current_level-1)%levels][CUP_LOCATION_Y]);
-  particle_location_x = pgm_read_byte(&level[(current_level-1)%levels][PARTICLE_LOCATION_X]);
-  particle_location_y = pgm_read_byte(&level[(current_level-1)%levels][PARTICLE_LOCATION_Y]);
-  if(difficulty == 0){
-    difficulty = map(current_level,0,10,20,5);
-  }
-  time_trial = false;
-  if(current_level>levels&&current_level){
-    level_time          = FRAMERATE+pgm_read_byte(&level[(current_level-1)%levels][TIME_TRIAL])*FRAMERATE;
-    level_time--; // remove the visible extra second
-    level_time-=(((current_level-11)/10)*5)*FRAMERATE;
-    time_trial = true;
-    difficulty = 0;  
-  }
-  w[0][0] = 2 + cup_location_x;
-  w[0][2] = 25+ cup_location_x;
-  w[1][0] = 5 + cup_location_x;
-  w[1][2] = 22+ cup_location_x;
-  
-  w[0][1] = 2 + cup_location_y;
-  w[0][3] = 16+ cup_location_y;
-  w[1][1] = 16+ cup_location_y;
-  w[1][3] = 28+ cup_location_y;
 
-  //load the level from flash to ram this improves the performance a lot
-  for(uint8_t y = 0; y < 7; y++){
-     for(uint8_t x = 0; x < 16; x++){
-      level_screen[x][y] = pgm_read_byte(&level[(current_level-1)%levels][(x+((y*16)))+LEVEL_DATA]);
-     }
-  }
-  for(uint16_t i = 0; i < particle_count; i++){
-    p[i].x = particle_location_x;
-    p[i].y = particle_location_y;
-  }
-  //sets the cloud animation time by scaling it with the particle count
-  cloud_animation = map(particle_count,0,MAX_PARTICLES,0,160);
-}
 
 
 void particlePhysics(){
-  
   for(uint16_t i = 0; i < particle_count; i++){
+    arduboy.drawPixel(p[i].x,p[i].y,WHITE);
+  }
+  for(uint16_t i = 0; i < particle_count; i++){
+
     x_brownian = x_vol;
     y_brownian = y_vol;
-    
-    if(x_vol == 0)//this can be improved but the brownian motion provides randomness to the vector thats currently not under control 
-      x_brownian = (brown++%2==0)?-1:1;
+    brown++;
+    if(x_vol == 0)
+      x_brownian = ((brown&1)==0)?-1:1;
     else if(y_vol == 0)
-      y_brownian = (brown++%2==0)?-1:1;
+      y_brownian = ((brown&1)==0)?-1:1;
     
     if(x_brownian>0){
-      if(canMove(p[i].x+1,p[i].y)){//should probably turn this into a function now that the rendering is done within this block
+      if(canMove(p[i].x+1,p[i].y)){
         arduboy.drawPixel(p[i].x,p[i].y,BLACK);
         p[i].x++;
         arduboy.drawPixel(p[i].x,p[i].y,WHITE);
@@ -520,6 +475,7 @@ void particlePhysics(){
         arduboy.drawPixel(p[i].x,p[i].y,BLACK);
         p[i].x--;
         arduboy.drawPixel(p[i].x,p[i].y,WHITE);
+        
       }
     }
     if(y_brownian>0){
@@ -536,16 +492,19 @@ void particlePhysics(){
       }
     }
     
+    if( toggler&&(i&1)==0)checkScore(i,p[i].x,p[i].y);
+    if(!toggler&&(i&1)==1)checkScore(i,p[i].x,p[i].y);
   }
 }
 
 //if it cant move itll increment brown just for added randomness 
 boolean canMove(uint8_t x, uint8_t y){
-  if(arduboy.getPixel(x,y)==WHITE){
+
+  if(arduboy.getPixel(x,y)){
     brown++;
     return false;
   }
-  return !(x<0||y<0||y>63||x>127);//collision bounds for the particles could probably set y to 8 instead of 0 with the new UI
+  return !(x<0||y<8||y>63||x>127);//collision bounds for the particles
 }
 
 /*
@@ -561,43 +520,93 @@ boolean canMove(uint8_t x, uint8_t y){
  * performance optimisations im planning with this are to do it over the course of multiple frames since its a low reuirement in terms of gameplay
  */
 
-void checkScore(uint16_t &i, uint8_t &x, uint8_t &y){//AABB box collisions for the shape of the cup
-    if(x>=w[0][0]&&y>=w[0][1]&&x<=w[0][2]&&y<=w[0][3]||
-       x>=w[1][0]&&y>=w[1][1]&&x<=w[1][2]&&y<=w[1][3]
+inline void checkScore(uint16_t &i, uint8_t &x, uint8_t &y){//AABB box collisions for the shape of the cup
+    if(x>=w[1][0]&&y>=w[1][1]&&x<=w[1][2]&&y<=w[1][3]||
+       x>=w[0][0]&&y>=w[0][1]&&x<=w[0][2]&&y<=w[0][3]
+       
     ){
-      score++;
       pIn(i);
     }else if(i<in){
         pOut(i);
     }
 }
 
-void pIn(uint16_t & i){
+ void pIn(uint16_t & i){
   if(i >= in){
-    swap(p[in].x,p[i].x);//should write a new function that does this in one step 
-    swap(p[in].y,p[i].y);
+    swap(p[in].x,p[i].x,p[in].y,p[i].y);
     in++;
   }
 }
-void pOut(uint16_t & i){
+inline void pOut(uint16_t & i){
   if(i < in){
-    swap(p[in].x,p[i].x);
-    swap(p[in].y,p[i].y);
+    swap(p[in].x,p[i].x,p[in].y,p[i].y);
     in--;
   }
 }
+inline void swap(uint8_t &x, uint8_t &xx,uint8_t &y, uint8_t &yy) {
+  holder = x;
+  x = xx;
+  xx = y;
+  y = yy;
+  yy = xx;
+  xx = holder;
+}
 
-void swap(uint8_t &a, uint8_t &b) {
-  holder = a;
-  a = b;
-  b = holder;
+inline void startGame(){
+  arduboy.setRGBled(0,0,0);
+  score = 0;
+  in = 0;
+  level_time = 0;
+  game_over = false;
+  //load in level data for simplicitys sake
+  particle_count      = min(pgm_read_byte(&level[(current_level-1)%levels][PARTICLE_COUNT])<<1,MAX_PARTICLES);
+  percent_required    = pgm_read_byte(&level[(current_level-1)%levels][PERCENT_REQUIRED]);
+  difficulty          = pgm_read_byte(&level[(current_level-1)%levels][DIFFICULTY]);
+  cup_location_x      = pgm_read_byte(&level[(current_level-1)%levels][CUP_LOCATION_X]);
+  cup_location_y      = pgm_read_byte(&level[(current_level-1)%levels][CUP_LOCATION_Y]);
+  particle_location_x = pgm_read_byte(&level[(current_level-1)%levels][PARTICLE_LOCATION_X]);
+  particle_location_y = pgm_read_byte(&level[(current_level-1)%levels][PARTICLE_LOCATION_Y]);
+  if(difficulty == 0){
+    difficulty = map(current_level,0,10,20,5);
+  }
+  time_trial = false;
+  if(current_level>levels&&current_level){
+    level_time          = FRAMERATE+pgm_read_byte(&level[(current_level-1)%levels][TIME_TRIAL])*FRAMERATE;
+    
+    level_time -= ((level_time/300)*((current_level-11)/10))*FRAMERATE;
+    level_time--; // remove the visible extra second
+    
+    time_trial = true;
+    difficulty = 0;  
+  }
+  w[0][0] = 2 + cup_location_x;
+  w[0][2] = 25+ cup_location_x;
+  w[1][0] = 5 + cup_location_x;
+  w[1][2] = 22+ cup_location_x;
+  
+  w[0][1] = 2 + cup_location_y;
+  w[0][3] = 16+ cup_location_y;
+  w[1][1] = 2 + cup_location_y;
+  w[1][3] = 28+ cup_location_y;
+
+  //load the level from flash to ram this improves the performance a lot
+  for(uint8_t y = 0; y < 7; y++){
+     for(uint8_t x = 0; x < 16; x++){
+      level_screen[x][y] = pgm_read_byte(&level[(current_level-1)%levels][(x+((y*16)))+LEVEL_DATA])-1;
+     }
+  }
+  for(uint16_t i = 0; i < particle_count; i++){
+    p[i].x = particle_location_x;
+    p[i].y = (toggler)?particle_location_y:particle_location_y+(i/100);
+    toggler^=true;
+  }
+  //sets the cloud animation time by scaling it with the particle count
+  cloud_animation = map(particle_count,0,MAX_PARTICLES,0,160);
 }
 
 
-
-
 //ugly junk
-void drawBucket(uint8_t x, uint8_t y){
+inline void drawBucket(uint8_t x, uint8_t y){
   arduboy.drawLine(2+x,3+y,5+x,29+y);
   arduboy.drawLine(0+x,2+y,4+x,29+y);
   arduboy.drawLine(1+x,2+y,5+x,29+y);
@@ -609,4 +618,38 @@ void drawBucket(uint8_t x, uint8_t y){
   arduboy.drawLine(6+x,29+y,21+x,29+y);
   arduboy.drawLine(5+x,30+y,22+x,30+y);
   arduboy.drawLine(7+x,31+y,20+x,31+y);
+}
+
+
+uint8_t tile_cache[9];
+
+void drawBitmap(int8_t x, int8_t y,uint8_t id)
+{
+  
+  if(level_height==8){
+    if(tile_cache[8] == id){//if the ID is the same as the previous drawn thing then just do it again
+      drawFastRAMBitmap(x,y);
+    }else{
+      tile_cache[8] = id;
+      drawFastBitmap(x,y,(sprites+id*8));
+    }
+  }else{
+    arduboy.drawBitmap(x,y,(sprites+id*8),8,8,WHITE);
+  }
+}   //draws a grid tile perfect for 8X8 onscreen tiles that dont move along the y axis
+void drawFastBitmap(int8_t x, int8_t y, const uint8_t *bitmap)
+{
+  uint16_t sRow = (y/8)*WIDTH;
+  for (uint8_t iCol = 0; iCol<8; iCol++) {
+    tile_cache[iCol] = pgm_read_byte(bitmap+iCol);
+    Arduboy2::sBuffer[sRow + x + iCol] = tile_cache[iCol];
+  }
+}
+//draws a grid tile from RAM perfect for 8X8 onscreen tiles that dont move along the y axis and repeat a lot
+void drawFastRAMBitmap(int8_t x, int8_t y)
+{
+  uint16_t sRow = (y/8)*WIDTH;
+  for (uint8_t iCol = 0; iCol<8; iCol++) {
+    Arduboy2::sBuffer[sRow + x + iCol] = tile_cache[iCol];//draw from cache
+  }
 }
